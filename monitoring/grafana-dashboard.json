@@ -1,0 +1,51 @@
+{
+    "title": "ANDroidMCP Dashboard",
+    "uid": "androidmcp-v1",
+    "panels": [
+        {
+            "type": "stat",
+            "title": "Active Device Locks",
+            "targets": [
+                {
+                    "expr": "androidmcp_active_device_locks"
+                }
+            ]
+        },
+        {
+            "type": "graph",
+            "title": "ADB Commands/sec",
+            "targets": [
+                {
+                    "expr": "rate(androidmcp_adb_commands_total[1m])"
+                }
+            ]
+        },
+        {
+            "type": "graph",
+            "title": "Flash Operations",
+            "targets": [
+                {
+                    "expr": "rate(androidmcp_flash_operations_total[5m])"
+                }
+            ]
+        },
+        {
+            "type": "graph",
+            "title": "Device State Transitions",
+            "targets": [
+                {
+                    "expr": "rate(androidmcp_device_state_transitions_total[5m])"
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "HITL Token Validations",
+            "targets": [
+                {
+                    "expr": "androidmcp_hitl_token_validations_total"
+                }
+            ]
+        }
+    ]
+}

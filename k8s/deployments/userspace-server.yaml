@@ -1,0 +1,152 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: userspace-sa
+  namespace: androidmcp
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: device-state-store
+  namespace: androidmcp
+data:
+  devices.json: "{}"
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: userspace-workspace-pvc
+  namespace: androidmcp
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: androidmcp-shared-staging-pvc
+  namespace: androidmcp
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: android-userspace-server
+  namespace: androidmcp
+  labels:
+    app: android-userspace
+    risk-tier: low
+    mcp-server: "true"
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: android-userspace
+  template:
+    metadata:
+      labels:
+        app: android-userspace
+        risk-tier: low
+    spec:
+      serviceAccountName: userspace-sa
+      automountServiceAccountToken: false
+      containers:
+        - name: userspace-mcp
+          image: androidmcp/userspace-server:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8110
+              protocol: TCP
+          env:
+            - name: ADB_SERVER_HOST
+              value: "127.0.0.1"
+            - name: ADB_SERVER_PORT
+              value: "5037"
+            - name: MCP_PORT
+              value: "8110"
+            - name: WORKSPACE
+              value: "/workspace"
+            - name: ANDROIDMCP_STAGING_ROOT
+              value: "/workspace/staging"
+            - name: ORCHESTRATOR_MCP_URL
+              value: "http://k8s-orchestrator:8112/mcp"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "1000m"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: staging
+              mountPath: /workspace/staging
+            - name: usb-bus
+              mountPath: /dev/bus/usb
+          securityContext:
+            privileged: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsUser: 0
+            capabilities:
+              drop: [ALL]
+          livenessProbe:
+            tcpSocket:
+              port: 8110
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: 8110
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: userspace-workspace-pvc
+        - name: staging
+          persistentVolumeClaim:
+            claimName: androidmcp-shared-staging-pvc
+        - name: usb-bus
+          hostPath:
+            path: /dev/bus/usb
+            type: Directory
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: android-userspace
+  namespace: androidmcp
+  labels:
+    app: android-userspace
+spec:
+  type: ClusterIP
+  selector:
+    app: android-userspace
+  ports:
+    - name: http
+      port: 8110
+      targetPort: 8110
+      protocol: TCP

@@ -1,0 +1,126 @@
+# gitignore for ANDroidMCP
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Local development
+.env
+.env.local
+*.local
+.cache
+
+# K8s / Docker
+kubeconfig
+.kube/
+docker-compose.override.yml
+
+# Workspace
+/workspace
+/tmp
+*.log
+*.pid
+
+# Device-related
+*.apk
+*.img
+*.bin
+*.hex
+dumps/
+captures/
+screenshots/
+
+# Credentials (should NEVER be committed)
+.aws/
+.gcloud/
+*secret*
+*token*
+*key*
+*.pem
+*.p12
+*.jks
+
+# OS
+.DS_Store
+.AppleDouble
+.LSOverride
+thumbs.db
+
+# Editor
+.editorconfig.local
+.prettierrc.local
+
+# Node (if any frontend later)
+node_modules/
+npm-debug.log
+
+# Terraform / IaC (if added)
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Generated
+*.proto.go
+*.pb2.py
+
+# Exclude actual device state (but track ConfigMap structure)
+device-state*.json
+
+# IDE folders
+/.vscode
+/.idea
+
+# Keep version control clean
+.git/
+.gitattributes
+
+# Internal working docs / clutter - kept local only, not for public repo
+AI.md
+STATUS_AND_HANDOFF.md
+archive/
+files.zip
+ZIP/

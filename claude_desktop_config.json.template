@@ -1,0 +1,47 @@
+{
+  "mcpServers": {
+    "android-userspace": {
+      "command": "/home/kamau/MCP/http-to-stdio-bridge/venv/bin/python",
+      "args": ["/home/kamau/MCP/http-to-stdio-bridge/http_mcp_bridge.py"],
+      "env": {
+        "ANDROID_SERVICE": "userspace",
+        "ANDROID_SERVICE_HOST": "dizaster",
+        "ANDROID_MCP_LOCAL": "1"
+      }
+    },
+    "android-bootloader": {
+      "command": "/home/kamau/MCP/http-to-stdio-bridge/venv/bin/python",
+      "args": ["/home/kamau/MCP/http-to-stdio-bridge/http_mcp_bridge.py"],
+      "env": {
+        "ANDROID_SERVICE": "bootloader",
+        "ANDROID_SERVICE_HOST": "dizaster",
+        "ANDROID_MCP_LOCAL": "1",
+        "ORCHESTRATOR_MCP_URL": "http://127.0.0.1:8112/mcp",
+        "ANDROIDMCP_STAGING_ROOT": "/home/kamau/ANDroidMCP/staging"
+      }
+    },
+    "android-orchestrator": {
+      "command": "/home/kamau/MCP/http-to-stdio-bridge/venv/bin/python",
+      "args": ["/home/kamau/MCP/http-to-stdio-bridge/http_mcp_bridge.py"],
+      "env": {
+        "ANDROID_SERVICE": "orchestrator",
+        "ANDROID_SERVICE_HOST": "dizaster",
+        "ANDROID_MCP_LOCAL": "1"
+      }
+    },
+    "android-network": {
+      "command": "/home/kamau/MCP/http-to-stdio-bridge/venv/bin/python",
+      "args": ["/home/kamau/MCP/http-to-stdio-bridge/http_mcp_bridge.py"],
+      "env": {
+        "ANDROID_SERVICE": "network",
+        "ANDROID_SERVICE_HOST": "dizaster",
+        "ANDROID_MCP_LOCAL": "1"
+      }
+    }
+  },
+  "_notes": {
+    "never_use_url_entries": "Claude Desktop requires stdio bridge — see ANDROID_MCP_BRIDGE_STATUS.md",
+    "start_servers": "cd ~/ANDroidMCP && ./scripts/dev-start.sh",
+    "flash_workflow": "preflight_flash → flash_partition → resume_flash(user_confirms=true)"
+  }
+}

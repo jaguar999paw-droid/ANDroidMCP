@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: android-usb-edge-agent
+  namespace: androidmcp
+  labels:
+    app: android-usb-edge-agent
+spec:
+  selector:
+    matchLabels:
+      app: android-usb-edge-agent
+  template:
+    metadata:
+      labels:
+        app: android-usb-edge-agent
+    spec:
+      hostNetwork: false
+      hostIPC: false
+      hostPID: false
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: usb-edge-agent
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "sleep infinity"]
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: usb-bus
+              mountPath: /dev/bus/usb
+      volumes:
+        - name: usb-bus
+          hostPath:
+            path: /dev/bus/usb
+            type: Directory

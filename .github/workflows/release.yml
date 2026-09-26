@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+            platform_tools_zip: platform-tools-latest-linux.zip
+            ext: ""
+            archive: tar.gz
+          - os: windows-latest
+            platform: windows-x64
+            platform_tools_zip: platform-tools-latest-windows.zip
+            ext: ".exe"
+            archive: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build server binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist_out/bin
+          declare -A SERVERS=(
+            [android-userspace]=servers/userspace/server.py
+            [android-bootloader]=servers/bootloader/server.py
+            [android-orchestrator]=servers/orchestrator/server.py
+            [android-network]=servers/tailscale/server.py
+          )
+          for name in "${!SERVERS[@]}"; do
+            entry="${SERVERS[$name]}"
+            pyinstaller --onefile --clean --name "$name" \
+              --paths servers \
+              --paths "$(dirname "$entry")" \
+              "$entry"
+            cp "dist/${name}${{ matrix.ext }}" dist_out/bin/
+          done
+
+      - name: Fetch platform-tools (adb/fastboot)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSL -o pt.zip "https://dl.google.com/android/repository/${{ matrix.platform_tools_zip }}"
+          mkdir -p dist_out/platform-tools
+          python -c "import zipfile; zipfile.ZipFile('pt.zip').extractall('_pt')"
+          if [ -d _pt/platform-tools ]; then cp -r _pt/platform-tools/* dist_out/platform-tools/; fi
+
+      - name: Copy install scripts + docs
+        shell: bash
+        run: |
+          cp scripts/release/install.sh dist_out/ 2>/dev/null || true
+          cp scripts/release/install.ps1 dist_out/ 2>/dev/null || true
+          cp scripts/release/RELEASE_README.md dist_out/README.md 2>/dev/null || true
+
+      - name: Package archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist_out
+          NAME="androidmcp-${{ matrix.platform }}-${GITHUB_REF_NAME:-dev}"
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            powershell -Command "Compress-Archive -Path * -DestinationPath ../${NAME}.zip"
+          else
+            tar -czf "../${NAME}.tar.gz" .
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: androidmcp-${{ matrix.platform }}
+          path: |
+            androidmcp-*.zip
+            androidmcp-*.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

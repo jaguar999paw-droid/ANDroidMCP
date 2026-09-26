@@ -1,0 +1,101 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bootloader-sa
+  namespace: androidmcp
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: android-bootloader-server
+  namespace: androidmcp
+  labels:
+    app: android-bootloader
+    risk-tier: medium
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: android-bootloader
+  template:
+    metadata:
+      labels:
+        app: android-bootloader
+        risk-tier: medium
+    spec:
+      serviceAccountName: bootloader-sa
+      automountServiceAccountToken: false
+      volumes:
+        - name: staging
+          persistentVolumeClaim:
+            claimName: androidmcp-shared-staging-pvc
+        - name: usb-bus
+          hostPath:
+            path: /dev/bus/usb
+            type: Directory
+      containers:
+        - name: bootloader-mcp
+          image: androidmcp/bootloader-server:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8111
+              protocol: TCP
+          env:
+            - name: MCP_PORT
+              value: "8111"
+            - name: ANDROIDMCP_STAGING_ROOT
+              value: "/workspace/staging"
+            - name: ORCHESTRATOR_MCP_URL
+              value: "http://k8s-orchestrator:8112/mcp"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "1000m"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsUser: 0
+            capabilities:
+              drop: [ALL]
+              add: [SYS_RAWIO]
+          privileged: true
+          volumeMounts:
+            - name: staging
+              mountPath: /workspace/staging
+            - name: usb-bus
+              mountPath: /dev/bus/usb
+          livenessProbe:
+            tcpSocket:
+              port: 8111
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: 8111
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: android-bootloader
+  namespace: androidmcp
+spec:
+  type: ClusterIP
+  selector:
+    app: android-bootloader
+  ports:
+    - name: http
+      port: 8111
+      targetPort: 8111

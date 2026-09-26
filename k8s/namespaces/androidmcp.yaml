@@ -1,0 +1,20 @@
+# Kubernetes namespaces for ANDroidMCP
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: androidmcp
+  labels:
+    name: androidmcp
+    tier: application
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: androidmcp-critical
+  labels:
+    name: androidmcp-critical
+    security-tier: critical
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted

@@ -1,0 +1,245 @@
+#!/usr/bin/env python3
+"""
+Network Tailscale MCP Server
+
+Wraps the existing tailscale-mcp server with Android-specific network
+coordination tools: edge node registration, route advertising verification,
+and MCP endpoint reachability checks.
+
+Risk Level: LOW 🟢
+Transport: streamable-http
+Port: 8113
+"""
+
+import os
+import json
+import asyncio
+import subprocess
+from typing import Optional, List, Dict
+from datetime import datetime
+
+from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel
+
+mcp = FastMCP(
+    "network-tailscale",
+    host="0.0.0.0",
+    port=int(os.getenv("MCP_PORT", "8113")),
+)
+
+
+class EdgeNodeRegistration(BaseModel):
+    hostname: str
+    tailscale_ip: str
+    pod_cidr: str  # e.g. "10.42.0.0/16" for K3s
+    usb_capable: bool = True
+    brom_capable: bool = False
+    device_count: int = 0
+
+
+class MCPEndpoint(BaseModel):
+    server_name: str
+    url: str
+    tailscale_ip: str
+    port: int
+
+
+# --- Tools ---
+
+@mcp.tool()
+async def get_tailscale_status() -> dict:
+    """
+    Get current Tailscale status for this node.
+
+    Returns own IP, peer list, and active routes.
+    Fully automated - no user interaction needed.
+    """
+    try:
+        result = await asyncio.create_subprocess_exec(
+            "tailscale", "status", "--json",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(result.communicate(), timeout=10)
+        if result.returncode == 0:
+            return {"status": "ok", "data": json.loads(stdout)}
+        return {"status": "error", "error": stderr.decode()}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+async def get_own_tailscale_ip() -> dict:
+    """
+    Get the Tailscale IP of the current machine (dizaster).
+
+    Used to construct MCP endpoint URLs for claude_desktop_config.json.
+    """
+    try:
+        result = await asyncio.create_subprocess_exec(
+            "tailscale", "ip", "--4",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(result.communicate(), timeout=10)
+        if result.returncode == 0:
+            ip = stdout.decode().strip()
+            return {
+                "status": "ok",
+                "tailscale_ip": ip,
+                "mcp_endpoints": {
+                    "android-userspace":   f"http://{ip}:8110/mcp",
+                    "android-bootloader":  f"http://{ip}:8111/mcp",
+                    "k8s-orchestrator":    f"http://{ip}:8112/mcp",
+                    "network-tailscale":   f"http://{ip}:8113/mcp",
+                },
+            }
+        return {"status": "error", "error": stderr.decode()}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+async def check_mcp_endpoint_reachability(endpoint_url: str) -> dict:
+    """
+    Check if an ANDroidMCP HTTP endpoint is reachable over Tailscale.
+
+    Args:
+        endpoint_url: Full URL of MCP endpoint, e.g. http://100.x.x.x:8110/mcp
+
+    Returns reachability status, latency, and HTTP response code.
+    """
+    try:
+        result = await asyncio.create_subprocess_exec(
+            "curl", "-s", "-o", "/dev/null", "-w",
+            "%{http_code}|%{time_total}",
+            "--max-time", "5",
+            "-H", "Accept: text/event-stream",
+            endpoint_url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(result.communicate(), timeout=10)
+        parts = stdout.decode().strip().split("|")
+        http_code = parts[0] if parts else "0"
+        latency_s = float(parts[1]) if len(parts) > 1 else -1
+        reachable = http_code in ("200", "400", "405")  # SSE handshake gives 200/400
+        return {
+            "status": "ok",
+            "endpoint": endpoint_url,
+            "reachable": reachable,
+            "http_code": http_code,
+            "latency_ms": round(latency_s * 1000, 1),
+        }
+    except Exception as e:
+        return {"status": "error", "endpoint": endpoint_url, "error": str(e)}
+
+
+@mcp.tool()
+async def advertise_pod_cidr(pod_cidr: str = "10.42.0.0/16") -> dict:
+    """
+    Advertise K3s pod CIDR as a Tailscale subnet route.
+
+    This is Pattern B from REASONING.md: edge nodes advertise their
+    pod CIDR so all pods are reachable from any Tailscale peer.
+
+    Args:
+        pod_cidr: CIDR block to advertise (K3s default: 10.42.0.0/16)
+
+    ⚠️  Requires sudo. After running, approve the route in Tailscale admin.
+    """
+    try:
+        result = await asyncio.create_subprocess_exec(
+            "sudo", "tailscale", "up",
+            f"--advertise-routes={pod_cidr}",
+            "--accept-routes",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(result.communicate(), timeout=30)
+        if result.returncode == 0:
+            return {
+                "status": "ok",
+                "pod_cidr": pod_cidr,
+                "message": (
+                    f"Route {pod_cidr} advertised. "
+                    "Approve at https://login.tailscale.com/admin/machines"
+                ),
+            }
+        return {"status": "error", "error": stderr.decode()}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+async def list_advertised_routes() -> dict:
+    """
+    List all Tailscale routes currently advertised and accepted on this node.
+    """
+    try:
+        result = await asyncio.create_subprocess_exec(
+            "tailscale", "status",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(result.communicate(), timeout=10)
+        lines = stdout.decode().splitlines()
+        routes = [l for l in lines if "Routes" in l or "/" in l]
+        return {"status": "ok", "routes": routes, "raw_lines": len(lines)}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+async def generate_claude_desktop_config() -> dict:
+    """
+    Generate a claude_desktop_config.json snippet with current Tailscale IP.
+
+    Reads own Tailscale IP and produces the correct MCP server URLs for
+    all Phase 1 ANDroidMCP servers.
+    """
+    ip_result = await get_own_tailscale_ip()
+    if ip_result.get("status") != "ok":
+        # Fallback to localhost
+        ip = "127.0.0.1"
+        note = "Using localhost (Tailscale IP unavailable)"
+    else:
+        ip = ip_result["tailscale_ip"]
+        note = f"Using Tailscale IP {ip}"
+
+    config = {
+        "mcpServers": {
+            "android-userspace": {
+                "url": f"http://{ip}:8110/mcp",
+                "comment": "Phase 1: ADB/UI automation. Low risk.",
+            },
+            "android-bootloader": {
+                "url": f"http://{ip}:8111/mcp",
+                "comment": "Phase 1: Fastboot. Medium risk.",
+            },
+            "k8s-orchestrator": {
+                "url": f"http://{ip}:8112/mcp",
+                "comment": "Phase 1: Device state machine. Low risk.",
+            },
+            "network-tailscale": {
+                "url": f"http://{ip}:8113/mcp",
+                "comment": "Phase 1: Network coordination. Low risk.",
+            },
+            "android-bootrom": {
+                "command": "kubectl",
+                "args": [
+                    "exec", "-n", "androidmcp-critical",
+                    "deployment/android-bootrom-exploit-server",
+                    "-it", "--", "/mcp-server",
+                    "--transport", "stdio", "--hitl-strict",
+                ],
+                "env": {"KUBECONFIG": "/home/kamau/.kube/config"},
+                "comment": "Phase 3: CRITICAL. stdio only. Requires HITL token.",
+            },
+        }
+    }
+    return {"status": "ok", "note": note, "config": config}
+
+
+if __name__ == "__main__":
+    mcp.run(transport="streamable-http")

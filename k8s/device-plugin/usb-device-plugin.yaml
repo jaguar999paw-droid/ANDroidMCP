@@ -1,0 +1,95 @@
+# USB Device Plugin for ANDroidMCP
+# Exposes physical USB Android devices as K8s resource: android.io/fastboot-device
+# Phase 2 component — not deployed in Phase 1
+#
+# Pattern from REASONING.md §4: USB Strategy per Server
+# Bootloader-server pods request: android.io/fastboot-device: 1
+# This DaemonSet watches the host USB bus and registers devices.
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: android-usb-device-plugin
+  namespace: kube-system
+  labels:
+    app: android-usb-device-plugin
+    phase: "2"
+spec:
+  selector:
+    matchLabels:
+      app: android-usb-device-plugin
+  template:
+    metadata:
+      labels:
+        app: android-usb-device-plugin
+    spec:
+      hostNetwork: true
+      hostPID: true
+      priorityClassName: system-node-critical
+
+      tolerations:
+        - key: CriticalAddonsOnly
+          operator: Exists
+        - effect: NoSchedule
+          operator: Exists
+
+      containers:
+        - name: device-plugin
+          image: androidmcp/usb-device-plugin:latest
+          imagePullPolicy: IfNotPresent
+
+          securityContext:
+            privileged: true
+
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            # Vendor IDs to expose as fastboot devices
+            - name: FASTBOOT_VENDOR_IDS
+              value: "18d1,04e8,22d9,0955,2717,05c6"
+            # Vendor IDs to expose as BROM/EDL devices (reserved for Phase 3)
+            - name: BROM_VENDOR_IDS
+              value: "0e8d:0003,05c6:9008"
+
+          resources:
+            requests:
+              memory: "50Mi"
+              cpu: "50m"
+            limits:
+              memory: "100Mi"
+              cpu: "100m"
+
+          volumeMounts:
+            - name: device-plugin
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: dev-usb
+              mountPath: /dev/bus/usb
+            - name: udev-rules
+              mountPath: /run/udev
+              readOnly: true
+
+      volumes:
+        - name: device-plugin
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+        - name: dev-usb
+          hostPath:
+            path: /dev/bus/usb
+            type: DirectoryOrCreate
+        - name: udev-rules
+          hostPath:
+            path: /run/udev
+---
+# NOTE: The actual device-plugin binary (androidmcp/usb-device-plugin:latest)
+# is a Phase 2 deliverable. This manifest is scaffolded for reference.
+# For Phase 1 testing: use hostPath volume mounts in bootloader-server.yaml directly.
+#
+# Resource exposed: android.io/fastboot-device
+# Resource exposed: android.io/brom-device (Phase 3)
+#
+# Usage in pod spec:
+#   resources:
+#     limits:
+#       android.io/fastboot-device: "1"

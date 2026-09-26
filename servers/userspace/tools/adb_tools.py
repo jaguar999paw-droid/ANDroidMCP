@@ -1,0 +1,225 @@
+"""ADB interaction tools for Android device communication."""
+
+import asyncio
+import subprocess
+import json
+from typing import Optional, List, Dict, Any
+from dataclasses import dataclass
+
+
+@dataclass
+class ADBDevice:
+    """Represents a connected Android device."""
+    serial: str
+    state: str
+    model: Optional[str] = None
+    device: Optional[str] = None
+    transport_id: Optional[str] = None
+
+
+class ADBManager:
+    """Manages ADB operations with proper error handling."""
+
+    def __init__(self, adb_server_host: str = "localhost", adb_server_port: int = 5037):
+        self.adb_server_host = adb_server_host
+        self.adb_server_port = adb_server_port
+
+    @property
+    def base_adb_args(self) -> list[str]:
+        return ["adb", "-H", self.adb_server_host, "-P", str(self.adb_server_port)]
+
+    async def get_connected_devices(self) -> List[ADBDevice]:
+        """
+        Get list of all connected Android devices.
+        
+        Returns:
+            List of ADBDevice objects representing connected devices
+        """
+        try:
+            result = await self._run_adb_command(["devices", "-l"])
+            devices = []
+            
+            # Parse adb devices -l output
+            for line in result.strip().split('\n')[1:]:  # Skip header
+                if not line.strip():
+                    continue
+                
+                parts = line.split()
+                if len(parts) >= 2:
+                    serial = parts[0]
+                    state = parts[1]
+                    
+                    # Parse additional attributes if present
+                    device_info = {}
+                    for part in parts[2:]:
+                        if ":" in part:
+                            key, val = part.split(":", 1)
+                            device_info[key] = val
+                    
+                    device = ADBDevice(
+                        serial=serial,
+                        state=state,
+                        model=device_info.get("model"),
+                        device=device_info.get("device"),
+                        transport_id=device_info.get("transport_id")
+                    )
+                    devices.append(device)
+            
+            return devices
+        except Exception as e:
+            raise RuntimeError(f"Failed to get connected devices: {str(e)}")
+    
+    async def shell(self, serial: str, command: str, timeout: int = 30) -> str:
+        """
+        Execute a shell command on the device.
+        
+        Args:
+            serial: Device serial number
+            command: Shell command to execute
+            timeout: Command timeout in seconds
+            
+        Returns:
+            Command output as string
+        """
+        try:
+            result = await self._run_adb_command(
+                ["-s", serial, "shell", command],
+                timeout=timeout
+            )
+            return result
+        except Exception as e:
+            raise RuntimeError(f"Shell command failed on {serial}: {str(e)}")
+    
+    async def push(self, serial: str, local_path: str, remote_path: str) -> None:
+        """
+        Push a file to device.
+        
+        Args:
+            serial: Device serial number
+            local_path: Local file path
+            remote_path: Remote device path
+        """
+        try:
+            await self._run_adb_command(["-s", serial, "push", local_path, remote_path])
+        except Exception as e:
+            raise RuntimeError(f"Push failed to {serial}: {str(e)}")
+    
+    async def pull(self, serial: str, remote_path: str, local_path: str) -> None:
+        """
+        Pull a file from device.
+        
+        Args:
+            serial: Device serial number
+            remote_path: Remote device path
+            local_path: Local file path
+        """
+        try:
+            await self._run_adb_command(["-s", serial, "pull", remote_path, local_path])
+        except Exception as e:
+            raise RuntimeError(f"Pull failed from {serial}: {str(e)}")
+    
+    async def get_device_properties(self, serial: str) -> Dict[str, str]:
+        """
+        Get all device properties using getprop.
+        
+        Args:
+            serial: Device serial number
+            
+        Returns:
+            Dictionary of device properties
+        """
+        try:
+            output = await self.shell(serial, "getprop")
+            properties = {}
+            
+            for line in output.strip().split('\n'):
+                if line.startswith('[') and ']: [' in line:
+                    # Parse [key]: [value] format
+                    key = line[1:line.index(']')]
+                    value = line[line.index(']: [') + 4:-1]
+                    properties[key] = value
+            
+            return properties
+        except Exception as e:
+            raise RuntimeError(f"Failed to get properties from {serial}: {str(e)}")
+    
+    async def _run_adb_command(
+        self, 
+        args: List[str], 
+        timeout: int = 30
+    ) -> str:
+        """
+        Internal method to run an ADB command.
+        
+        Args:
+            args: List of ADB command arguments
+            timeout: Command timeout in seconds
+            
+        Returns:
+            Command output as string
+        """
+        cmd = self.base_adb_args + args
+        
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=timeout
+                )
+                
+                if process.returncode != 0:
+                    error_msg = stderr.decode('utf-8', errors='ignore')
+                    raise RuntimeError(f"ADB error: {error_msg}")
+                
+                return stdout.decode('utf-8', errors='ignore')
+            except asyncio.TimeoutError:
+                process.kill()
+                raise RuntimeError(f"ADB command timed out after {timeout}s")
+        
+        except Exception as e:
+            raise RuntimeError(f"Failed to execute ADB command: {str(e)}")
+
+    async def connect_tcp(self, address: str, timeout: int = 30) -> str:
+        """Use adb connect to attach a remote TCP device."""
+        try:
+            return await self._run_adb_command(["connect", address], timeout=timeout)
+        except Exception as e:
+            raise RuntimeError(f"Failed to connect TCP device {address}: {str(e)}")
+
+    async def disconnect(self, address: str, timeout: int = 30) -> str:
+        """Use adb disconnect to drop a remote TCP device."""
+        try:
+            return await self._run_adb_command(["disconnect", address], timeout=timeout)
+        except Exception as e:
+            raise RuntimeError(f"Failed to disconnect TCP device {address}: {str(e)}")
+
+    async def get_battery_status(self, serial: str) -> Dict[str, str]:
+        """Read battery state from Android via dumpsys battery."""
+        output = await self.shell(serial, "dumpsys battery")
+        result: Dict[str, str] = {}
+        for line in output.splitlines():
+            if ": " in line:
+                key, value = line.split(": ", 1)
+                result[key.strip()] = value.strip()
+        return result
+
+    async def get_usb_state(self, serial: str) -> Dict[str, str]:
+        """Read current USB state from getprop."""
+        output = await self.shell(serial, "getprop sys.usb.state")
+        return {"usb_state": output.strip()}
+
+    async def get_device_health(self, serial: str) -> Dict[str, Any]:
+        """Collect device health telemetry from Android."""
+        battery = await self.get_battery_status(serial)
+        usb = await self.get_usb_state(serial)
+        return {
+            "serial": serial,
+            "battery": battery,
+            "usb": usb,
+        }

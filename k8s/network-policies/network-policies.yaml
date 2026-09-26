@@ -1,0 +1,62 @@
+# NetworkPolicy: Default deny for androidmcp namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: androidmcp
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# Allow ingress to userspace-server from Tailscale
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-userspace-from-tailscale
+  namespace: androidmcp
+spec:
+  podSelector:
+    matchLabels:
+      app: android-userspace
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: tailscale
+      ports:
+        - protocol: TCP
+          port: 8100
+
+---
+# Allow pod-to-pod communication within androidmcp namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-internal-communication
+  namespace: androidmcp
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+
+---
+# Deny all for critical namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all-bootrom
+  namespace: androidmcp-critical
+spec:
+  podSelector:
+    matchLabels:
+      app: android-bootrom-exploit
+  policyTypes:
+    - Ingress
+    - Egress
