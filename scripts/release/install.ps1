@@ -49,15 +49,7 @@ Write-Host ""
 Write-Host "Task status:"
 Get-ScheduledTask -TaskName "ANDroidMCP-*" | Get-ScheduledTaskInfo | Select-Object TaskName, LastTaskResult
 
-$tsIp = "<this-host-tailscale-ip>"
-try {
-    $tsOut = & tailscale ip -4 2>$null
-    if ($tsOut) { $tsIp = $tsOut.Trim() }
-} catch {}
-
 Write-Host ""
-Write-Host "MCP endpoints (reachable over your tailnet):"
-Write-Host "  http://$($tsIp):8110/mcp  (userspace)"
-Write-Host "  http://$($tsIp):8111/mcp  (bootloader)"
-Write-Host "  http://$($tsIp):8112/mcp  (orchestrator)"
-Write-Host "  http://$($tsIp):8113/mcp  (network)"
+Write-Host "MCP services are bound to loopback by default (127.0.0.1:8110-8113)."
+Write-Host "They are not remotely reachable as installed; use an SSH tunnel or"
+Write-Host "configure a tailnet-interface bind and MCP_AUTH_TOKEN in the tasks."

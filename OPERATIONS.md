@@ -57,32 +57,48 @@ Images go under `~/ANDroidMCP/staging/{serial}/` — never streamed over Tailsca
 
 Rule of thumb: **no destructive operation proceeds without explicit confirmation at the moment of execution**, and the user is responsible for physical device safety during flashes (don't unplug mid-write). Timeouts auto-abort and release the lock if the user doesn't respond (30s for unlock, 2 min for flash, 10 min for a BootROM write once that tier exists).
 
-## 5. Effectiveness — What's Actually Remote vs Needs Physical Presence
+## 5. Remote operation and physical requirements
 
-| Scenario | Remote-only effectiveness |
+The MCP client can be remote from the **edge host**, but Android operations run
+where the server process and device connection are. By default, the HTTP servers
+bind to `127.0.0.1`, so a remote client needs a secure tunnel (for example SSH
+port forwarding). Direct tailnet access requires setting `MCP_HOST` to the
+edge host's Tailscale interface and configuring `MCP_AUTH_TOKEN` on both the
+server and a bridge that sends the bearer header. Do not expose the endpoints
+on a public interface. Details and a tunnel example are in `README.md`.
+
+| Situation | What works / what is needed |
 |---|---|
-| UI automation / logcat / shell on an already-authorized device | ~95% |
-| ROM/firmware flashing (bootloader already unlocked) | ~80% |
-| Fleet management via USB hub | ~85% |
-| WiFi-only ADB (after `adb tcpip 5555` set once) | ~90% |
-| Brand-new out-of-box device | ~40% — needs a physical USB-debugging tap once |
-| BootROM/EDL | 0% — Phase 3 not implemented |
+| ADB over USB | Device is connected to the edge host, Android debugging is enabled, and the host is authorized. First authorization may need a physical approval on the device. |
+| ADB over device Wi-Fi | Android ADB-over-TCP is configured and the device is reachable from the ADB server used by `android-userspace`. This is separate from remotely reaching the MCP endpoint. |
+| Fastboot | Device is in a supported Fastboot mode and USB-connected to the edge host. The host runs `fastboot`; ADB and Fastboot are separate modes/tools. |
+| MediaTek BootROM / Qualcomm EDL | Not supported by the current runtime; the BootROM server is a scaffold and is not launched. |
 
-Needs a human physically present at least once: first-time USB authorization dialog, enabling Developer Options, the initial USB cable connection (until WiFi ADB is set up), and the power-button confirmation for bootloader unlock.
+Developer Options, initial USB setup, and some bootloader unlock flows may
+require a person physically present. For flashing, stage the image on the edge
+host and keep the device connected during the operation.
 
-## 6. Security Backlog (bare-metal dev servers — not yet hardened)
+## 6. Security status and open limitations
 
-> Status: loopback binding, optional bearer auth, input validation, path confinement, single-use attempt-limited confirmation tokens and an audit log are implemented (see section 8). Items below that are not covered there are still open and tracked in `GAP.md`.
+The HTTP services bind to `127.0.0.1` by default. A non-loopback `MCP_HOST`
+requires `MCP_AUTH_TOKEN`; the token is static bearer authentication, not
+per-user or per-tool authorization. Configure the separate stdio bridge to
+send the bearer header when auth is enabled. Do not rely on the Tailscale
+server's endpoint URLs as proof that listeners are reachable remotely.
 
-These are gaps in the *currently running* dev servers, distinct from the K8s target-state threat model in `ARCHITECTURE.md`:
+Implemented protections include input validation, staging-path confinement,
+preflight confirmation tokens, and an audit log for selected sensitive
+operations (see section 8 and `GAP.md`). Important limitations remain:
 
-- **No auth on the HTTP endpoints** (`0.0.0.0:8110-8113`, zero auth) — add a static token header or Tailscale `whois`-based middleware before trusting this beyond localhost.
-- **`execute_shell_command` has no allowlist/blocklist** — full `adb shell` reach on the device.
-- **No audit logging** of which session called which tool with what args on which device.
-- **`flash_partition` had no confirmation gate originally** — now mitigated by the preflight/resume-flash HITL pattern above, but `DANGEROUS_PARTITIONS` (bootloader/radio/recovery/userdata) should still get an extra token gate.
-- **Servers bind `0.0.0.0`**, not `127.0.0.1` — reachable from any interface, not just loopback/Tailscale.
-- **No device-owner consent registry** (`devices.yaml` mapping serial → owner → allowed ops) — anyone with USB-hub access could target someone else's device.
-- **No rate limiting** on tool calls.
+- `execute_shell_command` still permits arbitrary Android shell commands.
+- Confirmation codes are returned through the calling MCP client, so the
+  confirmation flow is not an independent human-authentication boundary.
+- There is no per-device ownership/consent registry or general tool-call rate
+  limit.
+- The BootROM/MTK/EDL server is only a scaffold; its design claims are not
+  deployed security controls.
+
+Use `GAP.md` for the detailed, current issue list.
 
 ## 7. CLI Quick Reference
 

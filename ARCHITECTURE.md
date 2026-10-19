@@ -5,7 +5,7 @@ This is the design reference: what the system is, why it's shaped this way, and 
 
 ## 1. What This Is
 
-A hardware-sovereign AI orchestration platform: Claude, via MCP, gets authenticated, audited, low-latency reach into the Android hardware stack — from UI automation down to raw BootROM silicon — on devices physically attached to **the host**, without needing physical presence.
+A design for giving an MCP client controlled access to Android devices physically attached to an edge host. The current runtime implements ADB and Fastboot operations; authenticated remote access and raw BootROM support are not fully implemented. See `README.md` for the current support and remote-access boundaries.
 
 Three constraints drive every design decision:
 1. **USB physicality** — USB isn't a network protocol; bridging it into a networked control plane without losing exclusivity or security is the core challenge.
@@ -20,9 +20,9 @@ Three constraints drive every design decision:
 | `android-bootloader-server` | 🟡 MEDIUM | HTTP/SSE (bridged) | Fastboot: flash, unlock/lock, getvar |
 | `android-orchestrator-server` | 🟢 LOW | HTTP/SSE (bridged) | Device state machine + exclusive locks |
 | `android-network-server` (tailscale) | 🟢 LOW | HTTP/SSE (bridged) | Tailscale status/routing |
-| `android-bootrom-exploit-server` | 🔴 CRITICAL | **stdio ONLY** | MTK/EDL raw hardware — Phase 3, not deployed |
+| `android-bootrom-exploit-server` | 🔴 CRITICAL | Scaffold only; not launched | MTK/EDL is not implemented or available in the current runtime |
 
-**Critical design decision:** the BootROM server is stdio-only, reachable only via `kubectl exec` from an active human terminal session. It cannot be hit over HTTP, cannot be routed through Tailscale, cannot be reached by an automated retry loop — unattended BootROM exploitation is structurally impossible, not just policy-forbidden.
+**Current status:** the BootROM file is a stub, is not started by the dev launcher, and is excluded from the release build. Its HITL verifier denies writes, but the unimplemented tool stubs should not be treated as a supported or secure BootROM service. The stdio-only / `kubectl exec` description is a design constraint, not a deployed boundary.
 
 ## 3. USB Passthrough Strategy
 
@@ -32,7 +32,7 @@ Three constraints drive every design decision:
 | Fastboot | K8s Device Plugin exposes `/dev/bus/usb/BUS/DEVICE` as a resource | `hostPath` mount, no full privilege |
 | BootROM/EDL (MTK vendor `0e8d:0003`, Qualcomm EDL `05c6:9008`) | Full `/dev/bus/usb` tree, `privileged: true` | Privileged; no network interface; `FROM scratch` image, no shell |
 
-**Revised guidance (from the integration synthesis):** MTK/EDL timing is too sensitive for a remote pod over Tailscale. The corrected plan is a **host-native `mtk-edge-daemon`** (systemd, stdio or unix socket) rather than routing BootROM through K8s + Tailscale — this pillar is deliberately deferred (Phase 3, lowest priority) rather than built as originally sketched.
+**Design guidance, not deployed:** MTK/EDL timing is too sensitive for a remote pod over Tailscale. The proposed direction is a host-native `mtk-edge-daemon` (systemd, stdio or unix socket), rather than routing BootROM through K8s + Tailscale. No such daemon is included here.
 
 ## 4. Device State Machine
 
@@ -46,9 +46,9 @@ Design target: a K8s ConfigMap per serial (`current_state`, `lock_holder`, `curr
 
 ## 5. Tailscale Integration
 
-Three patterns were evaluated — Tailscale-as-CNI (clean, complex), **subnet router (recommended, in use)**, and per-pod sidecar (max isolation, most overhead). the host runs Pattern B: it advertises the K3s pod CIDR and is directly reachable over the tailnet without a K8s operator.
+Three patterns were evaluated — Tailscale-as-CNI (clean, complex), subnet router, and per-pod sidecar. Subnet routing is a design option, not a guarantee that the current MCP listeners are remotely reachable. The HTTP services bind to loopback by default; direct tailnet access requires an explicit tailnet-interface bind and `MCP_AUTH_TOKEN`. An SSH tunnel to the edge host is the safer remote-client option while retaining loopback listeners.
 
-**Important correction from the integration review:** don't stream multi-GB flash images over Tailscale. MCP JSON-RPC traffic goes over the tailnet; image bytes are staged locally on the edge host (`~/ANDroidMCP/staging/{serial}/`) and referenced by local path in `flash_partition`.
+**Important:** don't stream multi-GB flash images over Tailscale. MCP JSON-RPC traffic may be tunneled over SSH or sent over an explicitly configured tailnet listener; image bytes are staged locally on the edge host (`staging/{serial}/`) and referenced by local path in `flash_partition`.
 
 ## 6. Kubernetes Status
 
@@ -78,7 +78,7 @@ Note: the threat model above describes the *K8s-deployed* target state. The live
 
 ## 9. Build Phases
 
-- **Phase 1 — Foundation:** ✅ substantially complete. All 4 non-critical servers implemented and running locally; orchestrator wiring (locks, preflight, file persistence) done; Claude Desktop bridge working.
+- **Phase 1 — Foundation:** ✅ substantially complete. Four non-critical HTTP server implementations are present; orchestrator wiring (locks, preflight, file persistence) is implemented. Running services and the separate Claude Desktop bridge depend on the local installation/configuration.
 - **Phase 2 — Bootloader hardening + K8s:** partial. `preflight_flash` / HITL-gated `resume_flash` implemented. USB device plugin, K8s deploy, ConfigMap persistence, Prometheus wiring: not started.
 - **Phase 3 — BootROM tier:** scaffold only. Redirected toward a host-native `mtk-edge-daemon` design; `write_raw_block` deliberately deferred pending security audit.
 - **Phase 4 — Observability & hardening:** not started (Prometheus/Grafana configs exist as scaffolds under `monitoring/`).
