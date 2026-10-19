@@ -21,15 +21,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 # FastMCP imports
 from mcp.server.fastmcp import FastMCP
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Local imports
 from tools.adb_tools import ADBManager, ADBDevice
 from tools.lifecycle_tools import LifecycleManager
 from common.orchestrator_client import OrchestratorClient
+from common.security import bind_host, serve
+from common.validation import SerialStr, AddressStr
+from common.audit import audit
 
 # Initialize FastMCP server
-mcp = FastMCP("android-userspace", host="0.0.0.0", port=int(os.getenv("MCP_PORT", "8110")))
+mcp = FastMCP("android-userspace", host=bind_host(), port=int(os.getenv("MCP_PORT", "8110")))
 orchestrator_client = OrchestratorClient()
 
 # Initialize managers
@@ -47,59 +50,59 @@ class GetConnectedDevicesInput(BaseModel):
 
 class CaptureScreenInput(BaseModel):
     """Input schema for capture_screen_and_hierarchy tool."""
-    serial: str
-    output_dir: str = "/workspace/captures"
+    serial: SerialStr
+    output_dir: str = os.path.expanduser("~/.cache/androidmcp/captures")
 
 
 class ShellCommandInput(BaseModel):
     """Input schema for execute_shell_command tool."""
-    serial: str
+    serial: SerialStr
     command: str
-    timeout: int = 30
+    timeout: int = Field(30, ge=1, le=300)
 
 
 class GetLogcatInput(BaseModel):
     """Input schema for get_logcat tool."""
-    serial: str
-    lines: int = 100
+    serial: SerialStr
+    lines: int = Field(100, ge=1, le=5000)
     filter_spec: Optional[str] = None
 
 
 class InstallApkInput(BaseModel):
     """Input schema for install_apk tool."""
-    serial: str
+    serial: SerialStr
     apk_path: str
 
 
 class TapInput(BaseModel):
     """Input schema for tap tool."""
-    serial: str
+    serial: SerialStr
     x: int
     y: int
 
 
 class TypeTextInput(BaseModel):
     """Input schema for type_text tool."""
-    serial: str
+    serial: SerialStr
     text: str
 
 
 class GetPropertiesInput(BaseModel):
     """Input schema for get_device_properties tool."""
-    serial: str
+    serial: SerialStr
 
 
 class ConnectTcpDeviceInput(BaseModel):
     serial: Optional[str] = None
-    address: str
+    address: AddressStr
 
 
 class DisconnectTcpDeviceInput(BaseModel):
-    address: str
+    address: AddressStr
 
 
 class GetDeviceHealthInput(BaseModel):
-    serial: str
+    serial: SerialStr
 
 
 @mcp.tool()
@@ -186,6 +189,7 @@ async def execute_shell_command(input: ShellCommandInput) -> str:
     Returns JSON with command output or error.
     """
     try:
+        audit("shell", serial=input.serial, command=input.command)
         result = await adb_manager.shell(input.serial, input.command, input.timeout)
         
         return json.dumps({
@@ -297,7 +301,11 @@ async def install_apk(input: InstallApkInput) -> str:
     Returns JSON with installation status.
     """
     try:
-        await lifecycle_manager.install_apk(input.serial, input.apk_path)
+        apk = Path(input.apk_path).expanduser().resolve()
+        if apk.suffix.lower() != ".apk" or not apk.is_file():
+            raise ValueError("apk_path must be an existing .apk file")
+        audit("install_apk", serial=input.serial, apk=apk.name)
+        await lifecycle_manager.install_apk(input.serial, str(apk))
         
         return json.dumps({
             "success": True,
@@ -458,4 +466,4 @@ async def health_check() -> str:
 
 if __name__ == "__main__":
     # Run the MCP server
-    mcp.run(transport="streamable-http")
+    serve(mcp)

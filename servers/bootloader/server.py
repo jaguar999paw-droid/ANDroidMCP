@@ -29,15 +29,18 @@ from pydantic import BaseModel
 from common.mcp_response import mcp_ok, mcp_err
 from common.orchestrator_client import OrchestratorClient
 from common.staging import resolve_staging_path, ensure_staging_dirs
+from common.security import bind_host, serve
+from common.validation import SerialStr, PartitionStr, DANGEROUS_PARTITIONS, is_dangerous_partition
+from common.audit import audit
 from common.preflight_store import (
     get as get_preflight_local,
     delete as delete_preflight_local,
     store as store_preflight_local,
     generate_confirm_token,
+    verify_confirm_token,
 )
 
 SERVER_NAME = "android-bootloader-server"
-DANGEROUS_PARTITIONS = {"system", "vendor", "userdata", "super"}
 
 
 class FastbootManager:
@@ -133,10 +136,10 @@ def _sha256_file(path: str) -> str:
 
 
 def _risk_level(partition: str) -> str:
-    return "CRITICAL" if partition in DANGEROUS_PARTITIONS else "MEDIUM"
+    return "CRITICAL" if is_dangerous_partition(partition) else "MEDIUM"
 
 
-mcp = FastMCP("android-bootloader", host="0.0.0.0", port=int(os.getenv("MCP_PORT", "8111")))
+mcp = FastMCP("android-bootloader", host=bind_host(), port=int(os.getenv("MCP_PORT", "8111")))
 fastboot_manager = FastbootManager()
 
 
@@ -145,23 +148,23 @@ class GetDevicesInput(BaseModel):
 
 
 class FlashPartitionInput(BaseModel):
-    serial: str
-    partition: str
+    serial: SerialStr
+    partition: PartitionStr
     image_path: str
     preflight_id: str
 
 
 class PreflightFlashInput(BaseModel):
-    serial: str
-    partition: str
+    serial: SerialStr
+    partition: PartitionStr
     image_path: str
     expected_sha256: Optional[str] = None
     require_slot: Optional[str] = None
 
 
 class ResumeFlashInput(BaseModel):
-    serial: str
-    partition: str
+    serial: SerialStr
+    partition: PartitionStr
     preflight_id: str
     confirm_token: str
     user_confirms: bool = False
@@ -170,11 +173,11 @@ class ResumeFlashInput(BaseModel):
 
 
 class PreflightUnlockInput(BaseModel):
-    serial: str
+    serial: SerialStr
 
 
 class ResumeUnlockInput(BaseModel):
-    serial: str
+    serial: SerialStr
     preflight_id: str
     confirm_token: str
     type_confirm: str
@@ -182,20 +185,21 @@ class ResumeUnlockInput(BaseModel):
 
 
 class LockBootloaderInput(BaseModel):
-    serial: str
+    serial: SerialStr
+    confirm: str = ""
 
 
 class GetBootloaderStatusInput(BaseModel):
-    serial: str
+    serial: SerialStr
 
 
 class StageImageInput(BaseModel):
-    serial: str
+    serial: SerialStr
     image_path: str
 
 
 class RebootBootloaderInput(BaseModel):
-    serial: str
+    serial: SerialStr
 
 
 async def _validate_preflight(
@@ -410,7 +414,9 @@ async def resume_flash(input: ResumeFlashInput) -> str:
         return mcp_err(code="PREFLIGHT_INVALID", message=msg)
 
     expected_token = rec.get("confirm_token")
-    if not expected_token or input.confirm_token != expected_token:
+    if not expected_token or not verify_confirm_token(
+        input.preflight_id, input.confirm_token, expected_token
+    ):
         return mcp_err(
             code="CONFIRM_TOKEN_MISMATCH",
             message="confirm_token does not match the code issued at preflight",
@@ -429,11 +435,13 @@ async def resume_flash(input: ResumeFlashInput) -> str:
         input.serial, input.image_path or ""
     )
 
+    delete_preflight_local(input.preflight_id)  # single-use: never replayable
+    audit("flash", serial=input.serial, partition=input.partition,
+          sha256=rec.get("image_sha256"))
     try:
         result = await fastboot_manager.flash_partition(
             input.serial, input.partition, resolved
         )
-        delete_preflight_local(input.preflight_id)
         await fastboot_manager.orchestrator.release_lock(input.serial, SERVER_NAME)
 
         if "failed" in result.lower() and "okay" not in result.lower():
@@ -555,16 +563,19 @@ async def resume_unlock_bootloader(input: ResumeUnlockInput) -> str:
         return mcp_err(code="PREFLIGHT_INVALID", message=msg)
 
     expected_token = rec.get("confirm_token")
-    if not expected_token or input.confirm_token != expected_token:
+    if not expected_token or not verify_confirm_token(
+        input.preflight_id, input.confirm_token, expected_token
+    ):
         return mcp_err(
             code="CONFIRM_TOKEN_MISMATCH",
             message="confirm_token does not match the code issued at preflight",
             hints=["Re-run preflight_unlock_bootloader to get the current code"],
         )
 
+    delete_preflight_local(input.preflight_id)  # single-use: never replayable
+    audit("unlock", serial=input.serial)
     try:
         result = await fastboot_manager.unlock_bootloader(input.serial)
-        delete_preflight_local(input.preflight_id)
         await fastboot_manager.orchestrator.release_lock(input.serial, SERVER_NAME)
         return mcp_ok(
             code="UNLOCK_INITIATED",
@@ -582,6 +593,15 @@ async def resume_unlock_bootloader(input: ResumeUnlockInput) -> str:
 
 @mcp.tool()
 async def lock_bootloader(input: LockBootloaderInput) -> str:
+    """Re-lock the bootloader. Requires confirm='LOCK' after explicit user approval:
+    re-locking a device that runs a custom ROM can brick it."""
+    if input.confirm != "LOCK":
+        return mcp_err(
+            code="CONFIRM_REQUIRED",
+            message="Re-locking can brick a device running a custom ROM. "
+                    "Get explicit user approval, then call again with confirm='LOCK'.",
+        )
+    audit("lock", serial=input.serial)
     try:
         result = await fastboot_manager.lock_bootloader(input.serial)
         await fastboot_manager.orchestrator.release_lock(input.serial, SERVER_NAME)
@@ -636,4 +656,4 @@ async def health_check() -> str:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
+    serve(mcp)

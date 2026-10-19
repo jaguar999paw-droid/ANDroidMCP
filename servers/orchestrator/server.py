@@ -24,6 +24,8 @@ from common.mcp_response import mcp_ok, mcp_err
 from common.persistence import load_devices, save_devices
 from common.preflight_store import store as store_preflight_record, get as get_preflight_record, delete as delete_preflight_record
 from common.staging import device_staging_dir, ensure_staging_dirs
+from common.security import bind_host, serve
+from common.validation import SerialStr
 
 
 @dataclass
@@ -159,24 +161,24 @@ class DeviceStateManager:
         return to_state in valid_transitions.get(from_state, [])
 
 
-mcp = FastMCP("k8s-orchestrator", host="0.0.0.0", port=int(os.getenv("MCP_PORT", "8112")))
+mcp = FastMCP("k8s-orchestrator", host=bind_host(), port=int(os.getenv("MCP_PORT", "8112")))
 state_manager = DeviceStateManager()
 
 
 class AcquireLockInput(BaseModel):
-    serial: str
+    serial: SerialStr
     requesting_server: str
     target_state: str
     timeout_seconds: int = 300
 
 
 class ReleaseLockInput(BaseModel):
-    serial: str
+    serial: SerialStr
     releasing_server: str
 
 
 class GetDeviceStateInput(BaseModel):
-    serial: str
+    serial: SerialStr
 
 
 class ListDevicesInput(BaseModel):
@@ -184,19 +186,19 @@ class ListDevicesInput(BaseModel):
 
 
 class HeartbeatInput(BaseModel):
-    serial: str
+    serial: SerialStr
     server_name: str
 
 
 class ValidateTransitionInput(BaseModel):
-    serial: str
+    serial: SerialStr
     from_state: str
     to_state: str
     requesting_server: str
 
 
 class StorePreflightInput(BaseModel):
-    serial: str
+    serial: SerialStr
     preflight_id: str
     payload: dict
 
@@ -206,7 +208,7 @@ class GetPreflightInput(BaseModel):
 
 
 class RegisterDeviceHealthInput(BaseModel):
-    serial: str
+    serial: SerialStr
     battery_pct: Optional[int] = None
     last_usb_seen: Optional[str] = None
     brick_risk_flags: Optional[list[str]] = None
@@ -375,4 +377,4 @@ async def cluster_health() -> str:
 
 if __name__ == "__main__":
     asyncio.run(state_manager.initialize())
-    mcp.run(transport="streamable-http")
+    serve(mcp)

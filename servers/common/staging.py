@@ -1,4 +1,9 @@
-"""Edge-local image staging paths (no Tailscale bulk transfer)."""
+"""Edge-local image staging paths (no Tailscale bulk transfer).
+
+Image paths are confined to the staging root (plus any directories listed in
+ANDROIDMCP_IMAGE_ROOTS, separated by os.pathsep). Symlinks are resolved before
+the check, so a link inside staging cannot point outside it.
+"""
 
 from __future__ import annotations
 
@@ -30,11 +35,32 @@ def ensure_staging_dirs(serial: str | None = None) -> Path:
     return root
 
 
+def allowed_image_roots() -> list[Path]:
+    roots = [staging_root()]
+    for part in os.getenv("ANDROIDMCP_IMAGE_ROOTS", "").split(os.pathsep):
+        if part.strip():
+            roots.append(Path(part).expanduser().resolve())
+    return roots
+
+
+def _confine(path: Path) -> Path:
+    resolved = path.resolve()
+    for root in allowed_image_roots():
+        if resolved == root or root in resolved.parents:
+            return resolved
+    raise ValueError(
+        "image path must be inside the staging directory "
+        "(or a directory listed in ANDROIDMCP_IMAGE_ROOTS)"
+    )
+
+
 def resolve_staging_path(serial: str, image_path: str) -> str:
-    """
-    Resolve image path: absolute as-is; relative paths under device staging dir.
+    """Resolve an image path and confine it to the allowed roots.
+
+    Absolute paths are accepted only if they land inside an allowed root;
+    relative paths are taken relative to the device's staging directory.
     """
     p = Path(image_path)
     if p.is_absolute():
-        return str(p.resolve())
-    return str((device_staging_dir(serial) / image_path).resolve())
+        return str(_confine(p))
+    return str(_confine(device_staging_dir(serial) / image_path))

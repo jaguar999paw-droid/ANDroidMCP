@@ -10,18 +10,18 @@ Port       : 8113
 import os, json, asyncio
 from datetime import datetime
 from mcp.server.fastmcp import FastMCP
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from common.security import bind_host, serve
 
 mcp = FastMCP(
     "network-tailscale",
-    host="0.0.0.0",
+    host=bind_host(),
     port=int(os.getenv("MCP_PORT", "8113")),
 )
 
-TAILSCALE_AUTH_KEY = os.getenv(
-    "TAILSCALE_AUTH_KEY",
-    "tskey-[REDACTED]",
-)
-DIZASTER_TS_IP = os.getenv("DIZASTER_TS_IP", "100.118.209.46")
+TAILSCALE_AUTH_KEY = os.getenv("TAILSCALE_AUTH_KEY", "")
+HOST_TS_IP = os.getenv("HOST_TS_IP", "")
 MCP_ENDPOINTS: dict[str, int] = {
     "android-userspace": 8110,
     "android-bootloader": 8111,
@@ -47,14 +47,14 @@ async def _own_ip() -> str | None:
 
 @mcp.tool()
 async def get_tailscale_status() -> dict:
-    """Get current Tailscale status for dizaster (own IP, peers, routes)."""
+    """Get current Tailscale status for host (own IP, peers, routes)."""
     rc, out, err = await _run("tailscale", "status", "--json")
     return {"status": "ok", "data": json.loads(out)} if rc == 0 else {"status": "error", "error": err}
 
 
 @mcp.tool()
 async def get_own_tailscale_ip() -> dict:
-    """Get dizaster's Tailscale IP and derive all ANDroidMCP endpoint URLs."""
+    """Get host's Tailscale IP and derive all ANDroidMCP endpoint URLs."""
     ip = await _own_ip()
     if not ip:
         return {"status": "error", "error": "Could not determine Tailscale IP"}
@@ -65,14 +65,39 @@ async def get_own_tailscale_ip() -> dict:
     }
 
 
+def _endpoint_allowed(url: str) -> bool:
+    """Only loopback / Tailscale-range hosts, MCP ports, /mcp path (anti-SSRF)."""
+    import ipaddress
+    from urllib.parse import urlparse
+    try:
+        u = urlparse(url)
+        host, port = u.hostname, u.port
+    except ValueError:
+        return False
+    if u.scheme not in ("http", "https") or not host or port not in MCP_ENDPOINTS.values():
+        return False
+    if u.path.rstrip("/") != "/mcp":
+        return False
+    if host == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip in ipaddress.ip_network("100.64.0.0/10")
+
+
 @mcp.tool()
 async def check_mcp_endpoint_reachability(endpoint_url: str) -> dict:
     """
     Check if an ANDroidMCP HTTP endpoint is reachable over Tailscale.
 
     Args:
-        endpoint_url: Full URL e.g. http://100.118.209.46:8110/mcp
+        endpoint_url: Full URL e.g. http://<tailscale-ip>:8110/mcp
     """
+    if not _endpoint_allowed(endpoint_url):
+        return {"status": "error",
+                "error": "endpoint not allowed (loopback/Tailscale MCP endpoints only)"}
     rc, out, _ = await _run(
         "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}|%{time_total}",
         "--max-time", "6", "-H", "Accept: text/event-stream", endpoint_url, timeout=10,
@@ -89,15 +114,15 @@ async def check_mcp_endpoint_reachability(endpoint_url: str) -> dict:
 
 @mcp.tool()
 async def check_all_endpoints() -> dict:
-    """Check reachability of every ANDroidMCP server on dizaster in one call."""
-    ip = DIZASTER_TS_IP
+    """Check reachability of every ANDroidMCP server on host in one call."""
+    ip = HOST_TS_IP or await _own_ip() or "127.0.0.1"
     results = {}
     for name, port in MCP_ENDPOINTS.items():
         results[name] = await check_mcp_endpoint_reachability(f"http://{ip}:{port}/mcp")
     return {
         "status": "ok",
         "all_reachable": all(r.get("reachable") for r in results.values()),
-        "dizaster_ip": ip,
+        "host_ip": ip,
         "servers": results,
         "checked_at": datetime.utcnow().isoformat() + "Z",
     }
@@ -181,24 +206,24 @@ async def get_android_onboarding_info() -> dict:
 
     Includes the bring-up command, auth key preview, hostname pattern, tag, and all endpoint URLs.
     """
-    ip = await _own_ip() or DIZASTER_TS_IP
-    masked = TAILSCALE_AUTH_KEY[:16] + "..." if TAILSCALE_AUTH_KEY else "(not set)"
+    ip = await _own_ip() or HOST_TS_IP or "<tailscale-ip>"
+    masked = "(set, hidden)" if TAILSCALE_AUTH_KEY else "(not set)"
     return {
         "status": "ok",
         "onboarding": {
-            "step_1_copy_script": "scp kamau@dizaster:~/ANDroidMCP/scripts/android-node-up.sh .",
+            "step_1_copy_script": "scp <user>@<host>:<project>/scripts/android-node-up.sh .",
             "step_2_run": "bash android-node-up.sh <device-name>",
             "hostname_pattern": "ANDroid-<suffix>",
             "tag_applied": NODE_TAG,
             "auth_key_preview": masked,
             "tailnet": "euplectes-tegus.ts.net",
         },
-        "dizaster_ip": ip,
+        "host_ip": ip,
         "mcp_endpoints": {n: f"http://{ip}:{p}/mcp" for n, p in MCP_ENDPOINTS.items()},
         "notes": [
             "Auth key is pre-authorized — no admin approval needed.",
             "tag:android is baked into the key; ACL rules apply automatically.",
-            "All 4 ANDroidMCP servers are reachable via dizaster's Tailscale IP.",
+            "All 4 ANDroidMCP servers are reachable via host's Tailscale IP.",
             "Plug in USB *after* joining Tailscale — ADB will auto-detect.",
         ],
     }
@@ -207,11 +232,11 @@ async def get_android_onboarding_info() -> dict:
 @mcp.tool()
 async def generate_claude_desktop_config() -> dict:
     """
-    Generate a claude_desktop_config.json mcpServers snippet using dizaster's live Tailscale IP.
+    Generate a claude_desktop_config.json mcpServers snippet using host's live Tailscale IP.
 
     Covers all Phase-1 ANDroidMCP servers plus the Phase-3 bootrom stdio placeholder.
     """
-    ip = await _own_ip() or DIZASTER_TS_IP
+    ip = await _own_ip() or HOST_TS_IP or "<tailscale-ip>"
     descriptions = {
         "android-userspace": "ADB / UI automation — LOW risk 🟢",
         "android-bootloader": "Fastboot — MEDIUM risk 🟡",
@@ -229,11 +254,11 @@ async def generate_claude_desktop_config() -> dict:
         "args": ["exec", "-n", "androidmcp-critical",
                  "deployment/android-bootrom-exploit-server",
                  "-it", "--", "/mcp-server", "--transport", "stdio", "--hitl-strict"],
-        "env": {"KUBECONFIG": "/home/kamau/.kube/config"},
+        "env": {"KUBECONFIG": os.path.expanduser("~/.kube/config")},
         "description": "Phase 3: CRITICAL — stdio only, requires HITL token",
     }
-    return {"status": "ok", "dizaster_ip": ip, "config": config}
+    return {"status": "ok", "host_ip": ip, "config": config}
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
+    serve(mcp)

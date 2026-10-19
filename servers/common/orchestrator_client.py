@@ -33,6 +33,9 @@ class OrchestratorClient:
         }
         if self._session_id:
             h["mcp-session-id"] = self._session_id
+        token = os.getenv("MCP_AUTH_TOKEN", "")
+        if token:
+            h["Authorization"] = f"Bearer {token}"
         return h
 
     async def _ensure_session(self, client: httpx.AsyncClient) -> None:
