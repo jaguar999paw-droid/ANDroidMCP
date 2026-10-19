@@ -61,12 +61,7 @@ for s in userspace bootloader orchestrator network; do
   systemctl --user is-active "androidmcp-$s"
 done
 
-TS_IP="$(command -v tailscale >/dev/null 2>&1 && tailscale ip -4 2>/dev/null || echo "<this-host-tailscale-ip>")"
 echo ""
-echo "MCP endpoints (reachable over your tailnet):"
-echo "  http://${TS_IP}:8110/mcp  (userspace)"
-echo "  http://${TS_IP}:8111/mcp  (bootloader)"
-echo "  http://${TS_IP}:8112/mcp  (orchestrator)"
-echo "  http://${TS_IP}:8113/mcp  (network)"
-echo ""
-echo "Point your MCP client / bridge config at these URLs."
+echo "MCP services are bound to loopback by default (127.0.0.1:8110-8113)."
+echo "They are not remotely reachable as installed; use an SSH tunnel or"
+echo "configure a tailnet-interface bind and MCP_AUTH_TOKEN in the user units."
