@@ -50,7 +50,7 @@ done
 echo ""
 echo "📡 Tailscale Status:"
 echo "-------------------"
-tailscale status --self 2>/dev/null | grep -E "dizaster|IP:" || echo "⚠️  Tailscale not connected"
+tailscale status --self 2>/dev/null | grep -E "IP:" || echo "⚠️  Tailscale not connected"
 
 echo ""
 if [ "$all_running" = true ]; then
@@ -61,7 +61,7 @@ fi
 
 echo ""
 echo "💡 Next Steps:"
-echo "  1. Ensure dizaster backend services are running"
+echo "  1. Ensure host backend services are running"
 echo "  2. Restart Claude Desktop"
 echo "  3. Check Claude console for MCP initialization logs"
 echo ""

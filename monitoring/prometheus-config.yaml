@@ -4,7 +4,7 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
-    cluster: dizaster
+    cluster: androidmcp
     project: androidmcp
 
 scrape_configs:

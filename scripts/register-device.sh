@@ -5,7 +5,7 @@ set -e
 
 SERIAL="${1:-}"
 MODEL="${2:-unknown}"
-NODE="${3:-dizaster}"
+NODE="${3:-$(hostname)}"
 BROM="${4:-false}"
 
 [ -z "$SERIAL" ] && echo "Usage: $0 <serial> <model> <node_hostname> [brom_capable=false]" && exit 1

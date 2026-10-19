@@ -1,10 +1,10 @@
 #!/bin/bash
 # ANDroidMCP — persistent server launcher
 # Run at login or via: systemctl --user start androidmcp
-# Servers bind to 0.0.0.0 but are only reachable via Tailscale (100.118.209.46)
+# Servers bind to 127.0.0.1 by default (set MCP_HOST and MCP_AUTH_TOKEN to expose them)
 
 set -e
-PROJECT="/home/kamau/ANDroidMCP"
+PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOGS="/tmp/androidmcp_logs"
 mkdir -p "$LOGS"
 
@@ -55,10 +55,10 @@ done
 
 echo ""
 echo "[androidmcp] all servers started. Accessible via Tailscale at:"
-echo "  android-userspace    → http://100.118.209.46:8110/mcp"
-echo "  android-bootloader   → http://100.118.209.46:8111/mcp"
-echo "  android-orchestrator → http://100.118.209.46:8112/mcp"
-echo "  android-network      → http://100.118.209.46:8113/mcp"
+echo "  android-userspace    → http://127.0.0.1:8110/mcp"
+echo "  android-bootloader   → http://127.0.0.1:8111/mcp"
+echo "  android-orchestrator → http://127.0.0.1:8112/mcp"
+echo "  android-network      → http://127.0.0.1:8113/mcp"
 echo ""
 echo "[androidmcp] Claude Desktop: restart app to pick up new servers."
 echo "[androidmcp] Logs: $LOGS/"

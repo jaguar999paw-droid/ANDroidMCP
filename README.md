@@ -1,18 +1,18 @@
 # ANDroidMCP — Hardware-Sovereign AI Orchestration Platform
 
-Claude, via MCP, gets authenticated, audited access to Android hardware on devices attached to **dizaster** — from UI automation (ADB) down to raw BootROM silicon — without needing physical presence for most operations.
+Claude, via MCP, gets authenticated, audited access to Android hardware on devices attached to the host machine — from UI automation (ADB) down to raw BootROM silicon — without needing physical presence for most operations.
 
 ⚠️ **This is not a fire-and-forget system.** Flashing and BootROM operations require explicit confirmation and, at some steps, physical device interaction. See `OPERATIONS.md` §4 before running anything destructive.
 
 ## Documentation
 
-Docs were consolidated from 16 scattered session files down to three, plus this README. The originals are preserved in `archive/` if you need manifest-level or session-by-session detail.
+Known bugs, security flaws, gaps and unimplemented pieces are tracked in **[GAP.md](GAP.md)**.
 
 | Doc | What's in it |
 |---|---|
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | Why it's built this way: risk-tier design, USB passthrough strategy, device state machine, Tailscale pattern, K8s target state, threat model, build phases |
 | **[OPERATIONS.md](OPERATIONS.md)** | How to run it day-to-day: start/stop, tools inventory, safe flash workflow, HITL model, CLI reference, security backlog, troubleshooting |
-| **[STATUS_AND_HANDOFF.md](STATUS_AND_HANDOFF.md)** | Current live state, what's built vs scaffolded, session history, known-bug fixes, immediate next steps |
+| **[GAP.md](GAP.md)** | Audit of bugs, security flaws, gaps and unimplemented pieces, with status |
 
 ## Overview
 
@@ -34,7 +34,7 @@ cd ~/ANDroidMCP && ./scripts/dev-start.sh   # start the 4 HTTP backends first
 Then ask Claude: *"List connected Android devices and take a screenshot."*
 
 Full startup, systemd management, and troubleshooting: **[OPERATIONS.md](OPERATIONS.md)**.
-Before assuming everything's running, check **[STATUS_AND_HANDOFF.md](STATUS_AND_HANDOFF.md)** — it has the last verified live-state snapshot and what's currently broken/off.
+Check **[GAP.md](GAP.md)** for what is currently broken, off, or unimplemented.
 
 ## Repo Layout
 
@@ -43,12 +43,12 @@ Before assuming everything's running, check **[STATUS_AND_HANDOFF.md](STATUS_AND
 ├── README.md                 (this file)
 ├── ARCHITECTURE.md
 ├── OPERATIONS.md
-├── STATUS_AND_HANDOFF.md
-├── archive/                  (16 original session/design docs)
+├── GAP.md
 ├── k8s/                      (manifests — written, not yet applied; see ARCHITECTURE.md §6)
 ├── servers/{userspace,bootloader,orchestrator,tailscale,bootrom}/
 ├── monitoring/                (Prometheus/Grafana scaffolds — not deployed)
 ├── scripts/
+├── tests/                    (unit tests: python -m unittest discover -s tests)
 └── staging/{serial}/          (local flash images — never streamed over Tailscale)
 ```
 

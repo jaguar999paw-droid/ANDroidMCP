@@ -1,11 +1,11 @@
 # ANDroidMCP — Architecture
 
-Consolidated from `REASONING.md` + `ARCHITECTURAL_SYNTHESIS_INTEGRATION.md` (originals moved to `archive/`).
+Consolidated from `REASONING.md` + `ARCHITECTURAL_SYNTHESIS_INTEGRATION.md`.
 This is the design reference: what the system is, why it's shaped this way, and what's designed-but-not-yet-built.
 
 ## 1. What This Is
 
-A hardware-sovereign AI orchestration platform: Claude, via MCP, gets authenticated, audited, low-latency reach into the Android hardware stack — from UI automation down to raw BootROM silicon — on devices physically attached to **dizaster**, without needing physical presence.
+A hardware-sovereign AI orchestration platform: Claude, via MCP, gets authenticated, audited, low-latency reach into the Android hardware stack — from UI automation down to raw BootROM silicon — on devices physically attached to **the host**, without needing physical presence.
 
 Three constraints drive every design decision:
 1. **USB physicality** — USB isn't a network protocol; bridging it into a networked control plane without losing exclusivity or security is the core challenge.
@@ -46,13 +46,13 @@ Design target: a K8s ConfigMap per serial (`current_state`, `lock_holder`, `curr
 
 ## 5. Tailscale Integration
 
-Three patterns were evaluated — Tailscale-as-CNI (clean, complex), **subnet router (recommended, in use)**, and per-pod sidecar (max isolation, most overhead). dizaster runs Pattern B: it advertises the K3s pod CIDR and is directly reachable over the tailnet without a K8s operator.
+Three patterns were evaluated — Tailscale-as-CNI (clean, complex), **subnet router (recommended, in use)**, and per-pod sidecar (max isolation, most overhead). the host runs Pattern B: it advertises the K3s pod CIDR and is directly reachable over the tailnet without a K8s operator.
 
 **Important correction from the integration review:** don't stream multi-GB flash images over Tailscale. MCP JSON-RPC traffic goes over the tailnet; image bytes are staged locally on the edge host (`~/ANDroidMCP/staging/{serial}/`) and referenced by local path in `flash_partition`.
 
 ## 6. Kubernetes Status
 
-Manifests exist under `k8s/` (namespaces, network policies, RBAC, device-plugin scaffold, deployments for all 4 non-critical servers plus the full `android-bootrom-exploit-server` spec with `NetworkPolicy: deny-all`, `automountServiceAccountToken: false`, and an HITL init-container gate). **None of this has been `kubectl apply`'d.** Current runtime is bare-metal dev mode on dizaster (see `STATUS_AND_HANDOFF.md`) — K3s/minikube deploy is still a Phase 2 task.
+Manifests exist under `k8s/` (namespaces, network policies, RBAC, device-plugin scaffold, deployments for all 4 non-critical servers plus the full `android-bootrom-exploit-server` spec with `NetworkPolicy: deny-all`, `automountServiceAccountToken: false`, and an HITL init-container gate). **None of this has been `kubectl apply`'d.** Current runtime is bare-metal dev mode on the host (see `GAP.md`) — K3s/minikube deploy is still a Phase 2 task.
 
 ## 7. Standard Response Envelope (target, partially adopted)
 
@@ -85,4 +85,4 @@ Note: the threat model above describes the *K8s-deployed* target state. The live
 
 ## References
 
-Full technical detail — K8s YAML specs, Mermaid sequence diagrams, Prometheus metric names, the full USB decision tree — lives in the archived originals: `archive/REASONING.md` and `archive/ARCHITECTURAL_SYNTHESIS_INTEGRATION.md`. Pull those back up if you need manifest-level detail; this doc is the map, not the territory.
+Full technical detail — K8s YAML specs, Mermaid sequence diagrams, Prometheus metric names, the full USB decision tree — is not included in this repository; this doc is the map, not the territory.

@@ -47,7 +47,7 @@ start_server() {
     eval "MCP_PORT=$port $extra_env python3 -u server.py" \
         > "/tmp/androidmcp_${dir}.log" 2>&1 &
     local pid=$!
-    echo "  [$name] pid=$pid → http://127.0.0.1:$port/mcp  (log: /tmp/androidmcp_${dir}.log)"
+    echo "  [$name] pid=$pid → http://127.0.0.1:$port/mcp  (log: /tmp/androidmcp_${dir}.log)" >&2
     echo $pid
 }
 
@@ -63,16 +63,20 @@ sleep 2
 # ── Health check ──────────────────────────────────────────────────────────────
 echo ""
 echo "Health check..."
-BRIDGE="/home/kamau/MCP/http-to-stdio-bridge/venv/bin/python"
-BRIDGE_SCRIPT="/home/kamau/MCP/http-to-stdio-bridge/http_mcp_bridge.py"
+AUTH_HDR=()
+if [ -n "${MCP_AUTH_TOKEN:-}" ]; then AUTH_HDR=(-H "Authorization: Bearer $MCP_AUTH_TOKEN"); fi
 INIT_MSG='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"healthcheck","version":"1.0"}}}'
 
 for SVC in userspace:8110 bootloader:8111 orchestrator:8112 network:8113; do
     NAME="${SVC%%:*}"
     PORT="${SVC##*:}"
-    RESULT=$(echo "$INIT_MSG" | HTTP_MCP_URL="http://127.0.0.1:$PORT/mcp" \
-        "$BRIDGE" "$BRIDGE_SCRIPT" 2>/dev/null \
-        | python3 -c "import sys,json; d=json.load(sys.stdin); print('OK' if 'result' in d else 'FAIL: '+str(d.get('error','?')))" 2>/dev/null || echo "UNREACHABLE")
+    if curl -s --max-time 5 ${AUTH_HDR[@]+"${AUTH_HDR[@]}"} \
+        -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+        -d "$INIT_MSG" "http://127.0.0.1:$PORT/mcp" | grep -q '"result"'; then
+        RESULT="OK"
+    else
+        RESULT="FAIL"
+    fi
     echo "  [$NAME :$PORT] $RESULT"
 done
 

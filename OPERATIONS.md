@@ -1,7 +1,7 @@
 # ANDroidMCP — Operations Guide
 
-Consolidated from `ANDROID_OPERATIONS_ASSESSMENT.md` + `SYSTEMD_SERVICES_SETUP.md` + `SYSTEMD_QUICK_REFERENCE.md` + `CLI_REFERENCE.md` + `INTERACTIVE_OPERATIONS.md` + `ANDROID_INTERACTION_CHECKLIST.md` + `INTEGRATION_GUIDE.md` (originals moved to `archive/`).
-This is the how-to-run-it and what-to-be-careful-of reference. For current live state, see `STATUS_AND_HANDOFF.md`. For why it's built this way, see `ARCHITECTURE.md`.
+Consolidated from `ANDROID_OPERATIONS_ASSESSMENT.md` + `SYSTEMD_SERVICES_SETUP.md` + `SYSTEMD_QUICK_REFERENCE.md` + `CLI_REFERENCE.md` + `INTERACTIVE_OPERATIONS.md` + `ANDROID_INTERACTION_CHECKLIST.md` + `INTEGRATION_GUIDE.md`.
+This is the how-to-run-it and what-to-be-careful-of reference. For current live state, see `GAP.md`. For why it's built this way, see `ARCHITECTURE.md`.
 
 ## 1. Starting / Stopping
 
@@ -9,11 +9,11 @@ This is the how-to-run-it and what-to-be-careful-of reference. For current live 
 # Start all 4 HTTP servers (dev mode, must be up BEFORE Claude Desktop connects)
 cd ~/ANDroidMCP && ./scripts/dev-start.sh
 
-# Via systemd (installed but check STATUS_AND_HANDOFF.md — currently inactive)
+# Via systemd (run scripts/setup-systemd-services.sh once to install the backend units)
 systemctl --user status android-mcp-*.service
-/home/kamau/ANDroidMCP/scripts/restart-services.sh
-/home/kamau/ANDroidMCP/scripts/stop-services.sh
-/home/kamau/ANDroidMCP/scripts/validate-services.sh
+~/ANDroidMCP/scripts/restart-services.sh
+~/ANDroidMCP/scripts/stop-services.sh
+~/ANDroidMCP/scripts/validate-services.sh
 
 # Live logs
 journalctl --user -u android-mcp-userspace -f
@@ -72,6 +72,8 @@ Needs a human physically present at least once: first-time USB authorization dia
 
 ## 6. Security Backlog (bare-metal dev servers — not yet hardened)
 
+> Status: loopback binding, optional bearer auth, input validation, path confinement, single-use attempt-limited confirmation tokens and an audit log are implemented (see section 8). Items below that are not covered there are still open and tracked in `GAP.md`.
+
 These are gaps in the *currently running* dev servers, distinct from the K8s target-state threat model in `ARCHITECTURE.md`:
 
 - **No auth on the HTTP endpoints** (`0.0.0.0:8110-8113`, zero auth) — add a static token header or Tailscale `whois`-based middleware before trusting this beyond localhost.
@@ -102,7 +104,7 @@ tailscale status
 tailscale status | grep Routes
 sudo tailscale up --advertise-routes=10.42.0.0/16 --accept-routes
 
-# Docker image builds (blocked historically — see STATUS_AND_HANDOFF.md network notes)
+# Docker image builds (blocked historically — see GAP.md O6)
 docker build -f servers/userspace/Dockerfile -t androidmcp/userspace-server:latest .
 ```
 
@@ -116,4 +118,22 @@ docker build -f servers/userspace/Dockerfile -t androidmcp/userspace-server:late
 
 ## References
 
-Full detail — Interactive-operations decision trees with example transcripts, the pre/during/post-op checklist, and the original step-by-step K3s integration guide — is preserved in `archive/`: `INTERACTIVE_OPERATIONS.md`, `ANDROID_INTERACTION_CHECKLIST.md`, `INTEGRATION_GUIDE.md`, `CLI_REFERENCE.md`.
+Full detail — Interactive-operations decision trees with example transcripts, the pre/during/post-op checklist, and the original step-by-step K3s integration guide — is not included in this repository.
+
+## 8. Hardening settings
+
+| Variable | Default | Effect |
+|---|---|---|
+| `MCP_HOST` | `127.0.0.1` | Interface the HTTP servers bind to. Setting a non-loopback value requires `MCP_AUTH_TOKEN`; the server refuses to start otherwise. |
+| `MCP_AUTH_TOKEN` | unset | When set, every request must carry `Authorization: Bearer <token>`. Backend-to-orchestrator calls send it automatically. The stdio bridge must be configured to send the same header. |
+| `ANDROIDMCP_STAGING_ROOT` | `~/ANDroidMCP/staging` | Image files must live here (symlinks are resolved first). |
+| `ANDROIDMCP_IMAGE_ROOTS` | unset | Extra directories (`os.pathsep`-separated) from which images may be flashed. |
+| `ANDROIDMCP_PREFLIGHT_TTL` | `600` | Seconds a flash/unlock preflight stays valid. |
+| `ANDROIDMCP_MAX_TOKEN_ATTEMPTS` | `5` | Wrong confirmation codes before the preflight is revoked. |
+| `ANDROIDMCP_AUDIT_FILE` | `~/.cache/androidmcp/audit.log` | JSON-lines audit log (owner-only) of shell, install, flash, unlock and lock calls. Secrets are never written. |
+| `HOST_TS_IP` | unset | Tailscale IP used by the network server for endpoint URLs (falls back to live detection). |
+| `TAILSCALE_AUTH_KEY` | unset | Only needed for node provisioning; never commit it. |
+
+Behaviour changes worth knowing: `lock_bootloader` now requires `confirm="LOCK"`; confirmation codes are single-use;
+partitions in the boot chain (`boot`, `vbmeta*`, `recovery`, `radio`, ...) are treated as CRITICAL and need
+`partition_confirm`; `execute_shell_command` timeouts are capped at 300 s.

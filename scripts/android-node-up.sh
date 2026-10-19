@@ -13,12 +13,12 @@ die()  { echo -e "${RED}  ✗${RST}  $*" >&2; exit 1; }
 sep()  { echo -e "${DIM}──────────────────────────────────────────────────────${RST}"; }
 
 TAILSCALE_AUTH_KEY="tskey-[REDACTED]"
-DIZASTER_TS_IP="100.118.209.46"
+HOST_TS_IP="${HOST_TS_IP:?set HOST_TS_IP to the server Tailscale IP}"
 declare -A MCP_SERVERS=(
-  ["android-userspace"]="http://${DIZASTER_TS_IP}:8110/mcp"
-  ["android-bootloader"]="http://${DIZASTER_TS_IP}:8111/mcp"
-  ["android-orchestrator"]="http://${DIZASTER_TS_IP}:8112/mcp"
-  ["android-network"]="http://${DIZASTER_TS_IP}:8113/mcp"
+  ["android-userspace"]="http://${HOST_TS_IP}:8110/mcp"
+  ["android-bootloader"]="http://${HOST_TS_IP}:8111/mcp"
+  ["android-orchestrator"]="http://${HOST_TS_IP}:8112/mcp"
+  ["android-network"]="http://${HOST_TS_IP}:8113/mcp"
 )
 NODE_TAG="tag:android"
 SKIP_VERIFY=false
@@ -47,7 +47,7 @@ echo -e "${CYN}╚════════════════════�
 echo ""
 info "Node hostname  : ${CYN}${NODE_HOSTNAME}${RST}"
 info "Tailscale tag  : ${CYN}${NODE_TAG}${RST}"
-info "dizaster IP    : ${CYN}${DIZASTER_TS_IP}${RST}"
+info "host IP       : ${CYN}${HOST_TS_IP}${RST}"
 sep
 
 info "Checking dependencies..."
@@ -129,12 +129,12 @@ cat > "$CONFIG_OUT" <<EOF
 {
   "_node": "${NODE_HOSTNAME}",
   "_node_ip": "${MY_IP}",
-  "_dizaster_ip": "${DIZASTER_TS_IP}",
+  "_host_ip": "${HOST_TS_IP}",
   "mcpServers": {
-    "android-userspace":    { "url": "http://${DIZASTER_TS_IP}:8110/mcp" },
-    "android-bootloader":   { "url": "http://${DIZASTER_TS_IP}:8111/mcp" },
-    "android-orchestrator": { "url": "http://${DIZASTER_TS_IP}:8112/mcp" },
-    "android-network":      { "url": "http://${DIZASTER_TS_IP}:8113/mcp" }
+    "android-userspace":    { "url": "http://${HOST_TS_IP}:8110/mcp" },
+    "android-bootloader":   { "url": "http://${HOST_TS_IP}:8111/mcp" },
+    "android-orchestrator": { "url": "http://${HOST_TS_IP}:8112/mcp" },
+    "android-network":      { "url": "http://${HOST_TS_IP}:8113/mcp" }
   }
 }
 EOF
